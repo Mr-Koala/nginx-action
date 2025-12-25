@@ -1,4 +1,4 @@
-name: Build Static Nginx (Final Fix)
+name: Build Static Nginx (Linux Static & macOS)
 
 on:
   workflow_dispatch:
@@ -10,8 +10,8 @@ env:
   ZLIB_VERSION: "1.3.1"
 
 jobs:
-  build-static:
-    name: Build Nginx ${{ matrix.arch }}
+  build-linux:
+    name: Build Linux Static Nginx ${{ matrix.arch }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -20,10 +20,8 @@ jobs:
     steps:
       - name: Checkout Source
         uses: actions/checkout@v4
-
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
-
       - name: Static Build in CentOS 7
         run: |
           docker run --rm --platform linux/${{ matrix.arch }} \
@@ -70,11 +68,53 @@ jobs:
               
               # 6. 整理产物
               mkdir -p /workspace/dist
-              cp objs/nginx /workspace/dist/nginx-\${NGINX_VERSION}-static-${{ matrix.arch }}
+              cp objs/nginx /workspace/dist/nginx-\${NGINX_VERSION}-linux-static-${{ matrix.arch }}
             "
 
-      - name: Upload Artifact
+      - name: Upload Linux Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nginx-${{ env.NGINX_VERSION }}-${{ matrix.arch }}
-          path: dist/nginx-${{ env.NGINX_VERSION }}-static-${{ matrix.arch }}
+          name: nginx-${{ env.NGINX_VERSION }}-linux-static-${{ matrix.arch }}
+          path: dist/
+# --- macOS 构建任务 ---
+  build-macos:
+    name: Build macOS (Universal)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: brew install perl pcre2 openssl zlib
+
+      - name: Download and Build
+        run: |
+          mkdir -p /tmp/build && cd /tmp/build
+          # 下载依赖源码以实现静态链接进二进制
+          curl -L -O https://www.openssl.org/source/openssl-${{ env.OPENSSL_VERSION }}.tar.gz && tar -zxf openssl-${{ env.OPENSSL_VERSION }}.tar.gz
+          curl -L -O https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${{ env.PCRE2_VERSION }}/pcre2-${{ env.PCRE2_VERSION }}.tar.gz && tar -zxf pcre2-${{ env.PCRE2_VERSION }}.tar.gz
+          curl -L -O https://zlib.net/zlib-${{ env.ZLIB_VERSION }}.tar.gz && tar -zxf zlib-${{ env.ZLIB_VERSION }}.tar.gz
+          curl -L -O http://nginx.org/download/nginx-${{ env.NGINX_VERSION }}.tar.gz && tar -zxf nginx-${{ env.NGINX_VERSION }}.tar.gz
+          
+          cd nginx-${{ env.NGINX_VERSION }}
+          
+          # macOS 下的编译配置
+          ./configure \
+            --with-http_ssl_module \
+            --with-http_v2_module \
+            --with-stream \
+            --with-stream_ssl_module \
+            --with-openssl=../openssl-${{ env.OPENSSL_VERSION }} \
+            --with-pcre=../pcre2-${{ env.PCRE2_VERSION }} \
+            --with-zlib=../zlib-${{ env.ZLIB_VERSION }}
+          
+          make -j$(sysctl -n hw.ncpu)
+          
+          mkdir -p ${{ github.workspace }}/dist
+          cp objs/nginx ${{ github.workspace }}/dist/nginx-${{ env.NGINX_VERSION }}-macos-arm64
+          
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nginx-${{ env.NGINX_VERSION }}-macos-arm64
+          path: dist/
