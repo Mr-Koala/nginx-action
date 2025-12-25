@@ -1,4 +1,4 @@
-name: Build Static Nginx (Fixed)
+name: Build Static Nginx (Final Fix)
 
 on:
   workflow_dispatch:
@@ -33,24 +33,23 @@ jobs:
             -e PCRE2_VERSION=${{ env.PCRE2_VERSION }} \
             -e ZLIB_VERSION=${{ env.ZLIB_VERSION }} \
             centos:7 /bin/bash -c "
-              # 1. 修复 CentOS 7 Yum 源
+              # 1. 环境准备：禁用 GPG 并安装必备包
               sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
               sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+              yum install -y --nogpgcheck gcc gcc-c++ make wget perl-core perl-IPC-Cmd glibc-static zlib-devel pcre-devel
               
-              # 2. 安装编译环境 (修复点：增加 glibc-static，并跳过 GPG 校验)
-              yum install -y --nogpgcheck gcc gcc-c++ make wget perl-core perl-IPC-Cmd glibc-static
-              
-              # 3. 下载依赖
+              # 2. 下载依赖源码
               cd /tmp
-              wget --no-check-certificate https://www.openssl.org/source/openssl-\${OPENSSL_VERSION}.tar.gz && tar -zxf openssl-\${OPENSSL_VERSION}.tar.gz
-              wget --no-check-certificate https://github.com/PCRE2Project/pcre2/releases/download/pcre2-\${PCRE2_VERSION}/pcre2-\${PCRE2_VERSION}.tar.gz && tar -zxf pcre2-\${PCRE2_VERSION}.tar.gz
-              wget --no-check-certificate https://zlib.net/zlib-\${ZLIB_VERSION}.tar.gz && tar -zxf zlib-\${ZLIB_VERSION}.tar.gz
+              wget -q --no-check-certificate https://www.openssl.org/source/openssl-\${OPENSSL_VERSION}.tar.gz && tar -zxf openssl-\${OPENSSL_VERSION}.tar.gz
+              wget -q --no-check-certificate https://github.com/PCRE2Project/pcre2/releases/download/pcre2-\${PCRE2_VERSION}/pcre2-\${PCRE2_VERSION}.tar.gz && tar -zxf pcre2-\${PCRE2_VERSION}.tar.gz
+              wget -q --no-check-certificate https://zlib.net/zlib-\${ZLIB_VERSION}.tar.gz && tar -zxf zlib-\${ZLIB_VERSION}.tar.gz
               
-              # 4. 准备 Nginx 源码
-              wget --no-check-certificate http://nginx.org/download/nginx-\${NGINX_VERSION}.tar.gz && tar -zxf nginx-\${NGINX_VERSION}.tar.gz
+              # 3. 下载并解压 Nginx
+              wget -q --no-check-certificate http://nginx.org/download/nginx-\${NGINX_VERSION}.tar.gz && tar -zxf nginx-\${NGINX_VERSION}.tar.gz
               cd nginx-\${NGINX_VERSION}
 
-              # 5. 执行编译配置
+              # 4. 执行配置
+              # 注意：我们去掉了 --with-ld-opt='-static'，改用更温和的方式
               ./configure --prefix=/usr/local/nginx \
                   --with-http_ssl_module \
                   --with-http_v2_module \
@@ -63,12 +62,13 @@ jobs:
                   --with-openssl=/tmp/openssl-\${OPENSSL_VERSION} \
                   --with-pcre=/tmp/pcre2-\${PCRE2_VERSION} \
                   --with-zlib=/tmp/zlib-\${ZLIB_VERSION} \
-                  --with-cc-opt='-O3 -static' \
-                  --with-ld-opt='-static'
+                  --with-cc-opt='-O3'
 
-              make -j\$(nproc)
+              # 5. 关键步骤：在编译链接时强制指定静态链接
+              # 我们通过修改 objs/Makefile 或者直接在 make 命令行注入
+              make -j\$(nproc) CORE_LIBS='-static -lpthread -ldl -lrt'
               
-              # 6. 提取二进制文件
+              # 6. 整理产物
               mkdir -p /workspace/dist
               cp objs/nginx /workspace/dist/nginx-\${NGINX_VERSION}-static-${{ matrix.arch }}
             "
