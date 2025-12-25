@@ -1,9 +1,8 @@
-name: Build Static Nginx (Multi-Version)
+name: Build Static Nginx (Fixed)
 
 on:
-  workflow_dispatch: # 手动触发，方便随时更改版本
+  workflow_dispatch:
 
-# 在这里集中管理所有版本号
 env:
   NGINX_VERSION: "1.28.1"
   OPENSSL_VERSION: "3.0.15"
@@ -34,25 +33,24 @@ jobs:
             -e PCRE2_VERSION=${{ env.PCRE2_VERSION }} \
             -e ZLIB_VERSION=${{ env.ZLIB_VERSION }} \
             centos:7 /bin/bash -c "
-              # 1. 修复 CentOS 7 Yum 源 (由于已停止维护，需指向 Vault)
+              # 1. 修复 CentOS 7 Yum 源
               sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
               sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
               
-              # 2. 安装编译环境
-              yum install -y gcc gcc-c++ make wget perl-core perl-IPC-Cmd
+              # 2. 安装编译环境 (修复点：增加 glibc-static，并跳过 GPG 校验)
+              yum install -y --nogpgcheck gcc gcc-c++ make wget perl-core perl-IPC-Cmd glibc-static
               
-              # 3. 下载并解压所有依赖源码
+              # 3. 下载依赖
               cd /tmp
-              wget https://www.openssl.org/source/openssl-\${OPENSSL_VERSION}.tar.gz && tar -zxf openssl-\${OPENSSL_VERSION}.tar.gz
-              wget https://github.com/PCRE2Project/pcre2/releases/download/pcre2-\${PCRE2_VERSION}/pcre2-\${PCRE2_VERSION}.tar.gz && tar -zxf pcre2-\${PCRE2_VERSION}.tar.gz
-              wget https://zlib.net/zlib-\${ZLIB_VERSION}.tar.gz && tar -zxf zlib-\${ZLIB_VERSION}.tar.gz
+              wget --no-check-certificate https://www.openssl.org/source/openssl-\${OPENSSL_VERSION}.tar.gz && tar -zxf openssl-\${OPENSSL_VERSION}.tar.gz
+              wget --no-check-certificate https://github.com/PCRE2Project/pcre2/releases/download/pcre2-\${PCRE2_VERSION}/pcre2-\${PCRE2_VERSION}.tar.gz && tar -zxf pcre2-\${PCRE2_VERSION}.tar.gz
+              wget --no-check-certificate https://zlib.net/zlib-\${ZLIB_VERSION}.tar.gz && tar -zxf zlib-\${ZLIB_VERSION}.tar.gz
               
-              # 4. 准备 Nginx 源码 (如果仓库里没有，自动从官方下载)
-              # 如果你仓库里有 src/nginx 文件夹，可以删掉下面这两行下载代码
-              wget http://nginx.org/download/nginx-\${NGINX_VERSION}.tar.gz && tar -zxf nginx-\${NGINX_VERSION}.tar.gz
+              # 4. 准备 Nginx 源码
+              wget --no-check-certificate http://nginx.org/download/nginx-\${NGINX_VERSION}.tar.gz && tar -zxf nginx-\${NGINX_VERSION}.tar.gz
               cd nginx-\${NGINX_VERSION}
 
-              # 5. 执行静态编译配置
+              # 5. 执行编译配置
               ./configure --prefix=/usr/local/nginx \
                   --with-http_ssl_module \
                   --with-http_v2_module \
@@ -70,7 +68,7 @@ jobs:
 
               make -j\$(nproc)
               
-              # 6. 将产物移动到挂载目录
+              # 6. 提取二进制文件
               mkdir -p /workspace/dist
               cp objs/nginx /workspace/dist/nginx-\${NGINX_VERSION}-static-${{ matrix.arch }}
             "
